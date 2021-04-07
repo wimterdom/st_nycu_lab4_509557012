@@ -1,0 +1,115 @@
+# This workflow will build a Java project with Gradle
+# For more information see: https://help.github.com/actions/language-and-framework-guides/building-and-testing-java-with-gradle
+
+name: Java CI with Gradle
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'V*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  Build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up JDK 1.11
+      uses: actions/setup-java@v1
+      with:
+        java-version: 1.11
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    - name: Build with Gradle
+      run: |
+        ./gradlew compileJava
+        ./gradlew processResources
+        ./gradlew classes
+
+
+
+  Test:
+    needs: Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up JDK 1.11
+      uses: actions/setup-java@v1
+      with:
+        java-version: 1.11
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    - name: Test the project
+      run: |
+        ./gradlew compileTestJava
+        ./gradlew processTestResources
+        ./gradlew testClasses
+        ./gradlew test
+    - uses: actions/upload-artifact@v2
+      with:
+        name: TestReport
+        path: build/reports/tests/test
+      
+  Assemble:
+    needs: [Build, Test]
+    runs-on: ubuntu-latest
+    outputs:
+      jar_name: ${{ steps.step_get_jar_name.outputs.jar_name }}
+      artifact_jar_name: ${{ steps.step_get_artifact_jar_name.outputs.jar_name }} 
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up JDK 1.11
+      uses: actions/setup-java@v1
+      with:
+        java-version: 1.11      
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    - name: Output jar
+      run: |
+        ./gradlew jar
+        ./gradlew assemble
+    
+    - id: step_get_jar_name
+      run: echo "::set-output name=jar_name::$(find ./build/libs -name '*.jar' -exec basename {} \;)"
+    - id: step_get_artifact_jar_name
+      run: echo "::set-output name=jar_name::buildJar"
+      
+    - uses: actions/upload-artifact@v2
+      with:
+        name: ${{ steps.step_get_artifact_jar_name.outputs.jar_name }}
+        path: build/libs/*.jar
+            
+     
+
+  Release:
+    needs: Assemble
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+      
+    - name: Get release name
+      id: getReleaseName
+      run: echo ::set-output name=RELEASE_NAME::${GITHUB_REF/refs\/tags\//}
+    - name: Download jar file
+      uses: actions/download-artifact@v2
+      with:
+        name: ${{needs.assemble.outputs.artifact_jar_name}}
+    - name: Display structure of downloaded files
+      run: |
+          pwd
+          ls -R
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+          name: ${{ steps.getReleaseName.outputs.RELEASE_NAME }}
+          files: ${{needs.assemble.outputs.jar_name}}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
